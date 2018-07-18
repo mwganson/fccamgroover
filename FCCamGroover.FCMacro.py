@@ -6,13 +6,14 @@ import Part, Draft
 from math import *
 import time
 from DraftTools import msg as say
+import math
 
 
-__title__ = "FCBmpImport"
+__title__ = "FC Cam Groove"
 __author__ = "TheMarkster"
 __url__ = "https://github.com/mwganson/fccamgroover"
 __Wiki__ = "https://github.com/mwganson/fccamgroover/blob/master/README.md"
-__date__ = "2018.07.17" #year.month.date and optional a,b,c, etc. subrevision letter, e.g. 2018.10.16a
+__date__ = "2018.07.18" #year.month.date and optional a,b,c, etc. subrevision letter, e.g. 2018.10.16a
 __version__ = __date__
 
 #OS: Windows 10
@@ -30,7 +31,7 @@ __version__ = __date__
 
 
 
-msg = u"""FC Cam Groover, a macro to create a cam groove in a cylinder, by 'TheMarkster', 2018, (incorporating code 
+msg = u"""FC Cam Groover v"""+__version__+""", a macro to create a cam groove in a cylinder, by 'TheMarkster', 2018, (incorporating code 
 from the '3D Parametric Curve Macro' by Gomez Lucio and Laurent Despeyroux, 2015).  Credit also to user emills2 for his 
 invaluable feedback.<br/>
 <br/>
@@ -44,6 +45,7 @@ groove depth, <br/>
 groove width, <br/>
 strokes per revolution, <br/>
 stroke range, <br/>
+precision, <br/>
 <br/>
 
 <br/>
@@ -98,8 +100,8 @@ def processEvents():
      time.sleep(0.001)
      QtGui.QApplication.processEvents()
 
-def getDouble(txt1,txt2,default):
-    inp,ok = QtGui.QInputDialog.getDouble(window, txt1,txt2,default, 0,1000000, 1)
+def getDouble(txt1,txt2,default,start=0,decimals=4):
+    inp,ok = QtGui.QInputDialog.getDouble(window, txt1,txt2,default, start,1000000, decimals)
     if ok:
         return inp
     else:
@@ -112,6 +114,8 @@ def getInt(txt1,txt2,default):
     else:
         raise StandardError('User canceled')
 
+def getDistance3d(x1, y1, z1, x2, y2, z2):
+    return math.sqrt((x1 - x2)**2 + (y1 - y2)**2 + (z1 - z2)**2)
 
 
 
@@ -131,8 +135,8 @@ slotHeight = getDouble(u'Height of Groove',u'Enter the height of the slot to be 
 innerRadius = radius-depth
 strokeFactor = getDouble(u'Stroke Length',u'Enter the axial length of the stroke: (in mm)',5)
 strokeFactor /= radius
-strokesPerRevolution = getInt(u'Strokes per Revolution',u'Enter the number of strokes per revolution of the cylinder:', 2)
-
+strokesPerRevolution = getInt(u'Strokes per Revolution',u'Enter the number of strokes per revolution of the cylinder.  1 or 2 seems to work okay, but anything beyond 3 could be troublesome:', 2)
+precision = getDouble(u'Precision',u'Enter desired precision, lower values take (often much) longer to process, but might give better results (default is .01)',.01,.001,decimals=3)
 
 
 
@@ -336,28 +340,56 @@ par.cclose=True #make closed bspline
 par.bsline = True #make bspline
 par.poly=False #don't make dwire
 par.l3.setText('cos(t*a/2)*sin(t*a/2)*c*b') #z
+par.l6.setText(str(precision))#default .01
 
 if not App.ActiveDocument:
     App.newDocument()
-say(u'Making bspline #1...\n')
+
+#par.poly=True
+#par.bsline=False
+#say(u'Making DWire...\n')
+#processEvents()
+#par.draw() #DWire
+
+par.poly=False
+par.bsline=True
+say(u'Making BSpline...\n')
 processEvents()
-par.draw() #BSpline
-say(u'Making bspline #2...\n')
-processEvents()
-par.draw() #BSpline001
-#par.lc.setText(str(innerRadius)) #try using draft scale to make the larger radius bsplines, only don't scale in z-direction
-#par.draw() #BSpline002
-#par.draw() #BSpline003
+par.draw() #DWire
+
+#now we have a DWire and a BSpline
+
+
+#circle is concentric attachment, roll=45 degrees using center of mass
+Draft.makeCircle(slotHeight,face=False)
+cir = App.ActiveDocument.getObject('Circle')
+cir.Placement=App.Placement(App.Vector(0,0,0), App.Rotation(90,0,0), App.Vector(0,0,0))
+bs = App.ActiveDocument.getObject('BSpline')
+Draft.makePathArray(cir,bs,count=int(10*0.1/precision),xlate=None,align=True)
+pa = App.ActiveDocument.getObject('PathArray')
+#dw = App.ActiveDocument.getObject('DWire')
+points = []
+for v in pa.Shape.Vertexes:
+    points.append(v.Point)
+#dw.Points = points
+bs1 = Draft.makeBSpline(points,True,None)
+
+
+
+
 say(u'Scaling bspline1...\n')
 processEvents()
 Draft.scale([FreeCAD.ActiveDocument.BSpline],delta=FreeCAD.Vector(innerRadius/float(radius),innerRadius/float(radius),1.0),center=FreeCAD.Vector(0.0,0.0,0.0),copy=True,legacy=True)
 say(u'Scaling bspline2...\n')
 processEvents()
-Draft.scale([FreeCAD.ActiveDocument.BSpline],delta=FreeCAD.Vector(innerRadius/float(radius),innerRadius/float(radius),1.0),center=FreeCAD.Vector(0.0,0.0,0.0),copy=True,legacy=True)
-say(u'Placing bsplines...\n')
+Draft.scale([FreeCAD.ActiveDocument.BSpline001],delta=FreeCAD.Vector(innerRadius/float(radius),innerRadius/float(radius),1.0),center=FreeCAD.Vector(0.0,0.0,0.0),copy=True,legacy=True)
+
+#now make the original bsplines bigger so they extend outside the cylinder edges (to prevent issues with boolean cut later on)
+Draft.scale([FreeCAD.ActiveDocument.BSpline],delta=FreeCAD.Vector(1.05,1.05,1.0),center=FreeCAD.Vector(0.0,0.0,0.0),copy=False,legacy=True)
+say(u'Scaling bspline2...\n')
 processEvents()
-App.ActiveDocument.BSpline001.Placement=App.Placement(App.Vector(0,0,slotHeight), App.Rotation(0,0,0), App.Vector(0,0,0))
-App.ActiveDocument.BSpline003.Placement=App.Placement(App.Vector(0,0,slotHeight), App.Rotation(0,0,0), App.Vector(0,0,0))
+Draft.scale([FreeCAD.ActiveDocument.BSpline001],delta=FreeCAD.Vector(1.05,1.05,1.0),center=FreeCAD.Vector(0.0,0.0,0.0),copy=False,legacy=True)
+
 say(u'Making ruled surfaces...\n')
 processEvents()
 FreeCAD.ActiveDocument.addObject('Part::RuledSurface', 'Ruled Surface')
@@ -377,7 +409,7 @@ FreeCAD.ActiveDocument.addObject('Part::RuledSurface', 'Ruled Surface')
 FreeCAD.ActiveDocument.ActiveObject.Curve1=(FreeCAD.ActiveDocument.Ruled_Surface002,['Edge3'])
 FreeCAD.ActiveDocument.ActiveObject.Curve2=(FreeCAD.ActiveDocument.Ruled_Surface001,['Edge1'])
 FreeCAD.ActiveDocument.getObject("Ruled_Surface003").Orientation = u"Reversed"
-
+FreeCAD.ActiveDocument.getObject("Ruled_Surface002").Orientation = u"Forward"
 Gui.activeDocument().getObject("BSpline").Visibility=False
 Gui.activeDocument().getObject("BSpline001").Visibility=False
 Gui.activeDocument().getObject("BSpline002").Visibility=False
@@ -422,8 +454,12 @@ App.ActiveDocument.recompute()
 Gui.SendMsgToActiveView("ViewFit")
 App.ActiveDocument.getObject("Cylinder").Radius = str(radius)
 App.ActiveDocument.getObject("Cylinder").Height = str(cylinderHeight)
-App.ActiveDocument.Cylinder.Placement=App.Placement(App.Vector(0,0,-1.0*cylinderHeight/2.0), App.Rotation(0,0,0), App.Vector(0,0,0))
 
+
+App.ActiveDocument.Shell_solid.Placement=App.Placement(App.Vector(0,0,-slotHeight/2.0), App.Rotation(0,0,0), App.Vector(0,0,0)) #center groove in cylinder
+App.ActiveDocument.Cylinder.Placement=App.Placement(App.Vector(0,0,-cylinderHeight/2.0), App.Rotation(10,0,0), App.Vector(0,0,0)) #rotate slightly to move the edge lines apart
+
+Gui.ActiveDocument.getObject('PathArray').Visibility=False
 
 App.ActiveDocument.recompute()
 Gui.SendMsgToActiveView("ViewFit")
